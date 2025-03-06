@@ -12,6 +12,15 @@ extraEnvs:
       fieldRef:
         fieldPath: spec.nodeName
 
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 100m
+  limits:
+    memory: 256Mi
+    cpu: 300m
+useGOMEMLIMIT: true
+
 tolerations:
   - key: "node-role.kubernetes.io/control-plane"
     operator: "Exists"
