@@ -1,0 +1,15 @@
+default:
+  envOverrides:
+      - name: OTEL_COLLECTOR_NAME
+        value: otel-opentelemetry-collector
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: 'service.name=$(OTEL_SERVICE_NAME),service.namespace=default,service.version={{ .Chart.AppVersion }}'
+
+
+prometheus: 
+  enabled: false
+grafana:
+  enabled: false
+
+opentelemetry-collector:
+  enabled: false
