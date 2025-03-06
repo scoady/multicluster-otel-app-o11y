@@ -6,26 +6,17 @@ service:
 image:
   repository: "otel/opentelemetry-collector-contrib"
 
+
 extraEnvs:
   - name: "K8S_NODE_NAME"
     valueFrom:
       fieldRef:
         fieldPath: spec.nodeName
 
-resources:
-  requests:
-    memory: 256Mi
-    cpu: 100m
-  limits:
-    memory: 256Mi
-    cpu: 100m
-useGOMEMLIMIT: true
-
 tolerations:
   - key: "node-role.kubernetes.io/control-plane"
     operator: "Exists"
     effect: "NoSchedule"
-
 clusterRole:
   create: true
   rules:
@@ -37,24 +28,42 @@ affinity:
   nodeAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:
       nodeSelectorTerms:
-        - matchExpressions:
-            - key: az
-              operator: In
-              values: ["a", "b", "c"]
+      - matchExpressions:
+        - key: az
+          operator: In
+          values: ["a","b","c"]
 
 presets:
   hostMetrics:
-    enabled: true
+    enabled: false
   kubeletMetrics:
     enabled: false
   kubernetesAttributes:
     enabled: true
 
-config:
-  extensions:
-    health_check: {}
 
+
+config:    
+  # Tested with OpenTelemetry Collector Contrib v0.98.0
+  extensions:
+    health_check:
+      {}
   receivers:
+    filelog:
+      include:
+        - /var/log/pods/*/*/*.log
+      start_at: end
+      include_file_path: true
+      operators:
+        - type: json_parser
+          timestamp:
+            parse_from: attributes.time
+            layout: "%Y-%m-%dT%H:%M:%S.%LZ"
+        - type: regex_parser
+          regex: '^/var/log/pods/(?P<k8s_namespace_name>[^_]+)_(?P<k8s_pod_name>[^_]+)_(?P<k8s_pod_uid>[^/]+)/(?P<container_name>[^/]+)/'
+          parse_from: attributes["log.file.path"]
+          parse_to: attributes
+
     k8s_events:
       auth_type: kubeConfig
     prometheus:
@@ -63,129 +72,92 @@ config:
           scrape_interval: 60s
           scrape_timeout: 10s
           external_labels:
-            cluster: "apps-cluster"
-            cluster_name: "apps-cluster"
+            cluster: "app-cluster"
+            k8s.cluster.name: "app-cluster"
         scrape_configs:
-        - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-          job_name: integrations/kubernetes/cadvisor
-          kubernetes_sd_configs:
-            - role: node
-          relabel_configs:
-            - replacement: kubernetes.default.svc.cluster.local:443
-              target_label: __address__
-            - regex: (.+)
-              replacement: /api/v1/nodes/$$1/proxy/metrics/cadvisor
-              source_labels:
-                - __meta_kubernetes_node_name
-              target_label: __metrics_path__
-          metric_relabel_configs:
-            - source_labels: [__name__]
-              action: keep
-              regex: 'container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_network_transmit_bytes_total'
-          scheme: https
-          tls_config:
-            insecure_skip_verify: true
+          - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+            job_name: integrations/kubernetes/cadvisor
+            kubernetes_sd_configs:
+              - role: node
+            relabel_configs:
+              - replacement: kubernetes.default.svc.cluster.local:443
+                target_label: __address__
+              - regex: (.+)
+                replacement: /api/v1/nodes/$${1}/proxy/metrics/cadvisor
+                source_labels:
+                  - __meta_kubernetes_node_name
+                target_label: __metrics_path__
+            metric_relabel_configs:
+              - source_labels: [__name__]
+                action: keep
+                regex: 'container_cpu_cfs_periods_total|container_cpu_cfs_throttled_periods_total|container_cpu_usage_seconds_total|container_fs_reads_bytes_total|container_fs_reads_total|container_fs_writes_bytes_total|container_fs_writes_total|container_memory_cache|container_memory_rss|container_memory_swap|container_memory_working_set_bytes|container_network_receive_bytes_total|container_network_receive_packets_dropped_total|container_network_receive_packets_total|container_network_transmit_bytes_total|container_network_transmit_packets_dropped_total|container_network_transmit_packets_total|machine_memory_bytes'
+            scheme: https
+            tls_config:
+              ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              insecure_skip_verify: false
+              server_name: kubernetes
 
-        - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-          job_name: integrations/kubernetes/kubelet
-          kubernetes_sd_configs:
-            - role: node
-          relabel_configs:
-            - replacement: kubernetes.default.svc.cluster.local:443
-              target_label: __address__
-            - regex: (.+)
-              replacement: /api/v1/nodes/$$1/proxy/metrics
-              source_labels:
-                - __meta_kubernetes_node_name
-              target_label: __metrics_path__
-          scheme: https
-          tls_config:
-            insecure_skip_verify: true
+          - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+            job_name: integrations/kubernetes/kubelet
+            kubernetes_sd_configs:
+              - role: node
+            relabel_configs:
+              - replacement: kubernetes.default.svc.cluster.local:443
+                target_label: __address__
+              - regex: (.+)
+                replacement: /api/v1/nodes/$${1}/proxy/metrics
+                source_labels:
+                  - __meta_kubernetes_node_name
+                target_label: __metrics_path__
+            metric_relabel_configs:
+              - source_labels: [__name__]
+                action: keep
+                regex: 'container_cpu_usage_seconds_total|kubelet_certificate_manager_client_expiration_renew_errors|kubelet_certificate_manager_client_ttl_seconds|kubelet_certificate_manager_server_ttl_seconds|kubelet_cgroup_manager_duration_seconds_bucket|kubelet_cgroup_manager_duration_seconds_count|kubelet_node_config_error|kubelet_node_name|kubelet_pleg_relist_duration_seconds_bucket|kubelet_pleg_relist_duration_seconds_count|kubelet_pleg_relist_interval_seconds_bucket|kubelet_pod_start_duration_seconds_bucket|kubelet_pod_start_duration_seconds_count|kubelet_pod_worker_duration_seconds_bucket|kubelet_pod_worker_duration_seconds_count|kubelet_running_container_count|kubelet_running_containers|kubelet_running_pod_count|kubelet_running_pods|kubelet_runtime_operations_errors_total|kubelet_runtime_operations_total|kubelet_server_expiration_renew_errors|kubelet_volume_stats_available_bytes|kubelet_volume_stats_capacity_bytes|kubelet_volume_stats_inodes|kubelet_volume_stats_inodes_used|kubernetes_build_info|namespace_workload_pod|rest_client_requests_total|storage_operation_duration_seconds_count|storage_operation_errors_total|volume_manager_total_volumes'
+            scheme: https
+            tls_config:
+              ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              insecure_skip_verify: false
+              server_name: kubernetes
 
-        - job_name: integrations/kubernetes/kube-state-metrics
-          kubernetes_sd_configs:
-            - role: pod
-          relabel_configs:
-            - action: keep
-              regex: kube-state-metrics
-              source_labels:
-                - __meta_kubernetes_pod_label_app_kubernetes_io_name
+          - job_name: integrations/kubernetes/kube-state-metrics
+            kubernetes_sd_configs:
+              - role: pod
+            relabel_configs:
+              - action: keep
+                regex: kube-state-metrics
+                source_labels:
+                  - __meta_kubernetes_pod_label_app_kubernetes_io_name
+            metric_relabel_configs:
+              - source_labels: [__name__]
+                action: keep
+                regex: 'kube_daemonset.*|kube_deployment_metadata_generation|kube_deployment_spec_replicas|kube_deployment_status_observed_generation|kube_deployment_status_replicas_available|kube_deployment_status_replicas_updated|kube_horizontalpodautoscaler_spec_max_replicas|kube_horizontalpodautoscaler_spec_min_replicas|kube_horizontalpodautoscaler_status_current_replicas|kube_horizontalpodautoscaler_status_desired_replicas|kube_job.*|kube_namespace_status_phase|kube_node.*|kube_persistentvolumeclaim_resource_requests_storage_bytes|kube_pod_container_info|kube_pod_container_resource_limits|kube_pod_container_resource_requests|kube_pod_container_status_last_terminated_reason|kube_pod_container_status_restarts_total|kube_pod_container_status_waiting_reason|kube_pod_info|kube_pod_owner|kube_pod_start_time|kube_pod_status_phase|kube_pod_status_reason|kube_replicaset.*|kube_resourcequota|kube_statefulset.*'
 
-        - job_name: integrations/node_exporter
-          kubernetes_sd_configs:
-            - role: pod
-          relabel_configs:
-            - action: keep
-              regex: prometheus-node-exporter.*
-              source_labels:
-                - __meta_kubernetes_pod_label_app_kubernetes_io_name
-            - action: replace
-              source_labels:
-                - __meta_kubernetes_pod_node_name
-              target_label: instance
-            - action: replace
-              source_labels:
-                - __meta_kubernetes_namespace
-              target_label: namespace
-        - job_name: kubernetes-pods
-          kubernetes_sd_configs:
-          - role: pod
-            selectors:
-            - field: spec.nodeName=${env:K8S_NODE_NAME}
-              role: pod
-          relabel_configs:
-          - action: keep
-            regex: true
-            source_labels:
-            - __meta_kubernetes_pod_annotation_prometheus_io_scrape
-          - action: drop
-            regex: true
-            source_labels:
-            - __meta_kubernetes_pod_annotation_prometheus_io_scrape_slow
-          - action: replace
-            regex: (https?)
-            source_labels:
-            - __meta_kubernetes_pod_annotation_prometheus_io_scheme
-            target_label: __scheme__
-          - action: replace
-            regex: (.+)
-            source_labels:
-            - __meta_kubernetes_pod_annotation_prometheus_io_path
-            target_label: __metrics_path__
-          - action: replace
-            regex: ([^:]+)(?::\d+)?;(\d+)
-            replacement: $$1:$$2
-            source_labels:
-            - __address__
-            - __meta_kubernetes_pod_annotation_prometheus_io_port
-            target_label: __address__
-          - action: labelmap
-            regex: __meta_kubernetes_pod_annotation_prometheus_io_param_(.+)
-            replacement: __param_$$1
-          - action: labelmap
-            regex: __meta_kubernetes_pod_label_(.+)
-          - action: replace
-            source_labels:
-            - __meta_kubernetes_namespace
-            target_label: namespace
-          - action: replace
-            source_labels:
-            - __meta_kubernetes_pod_name
-            target_label: pod
-          - action: drop
-            regex: Pending|Succeeded|Failed|Completed
-            source_labels:
-            - __meta_kubernetes_pod_phase
-          - action: replace
-            source_labels:
-            - __meta_kubernetes_pod_label_app_kubernetes_io_name
-            target_label: job
-
+          - job_name: integrations/node_exporter
+            kubernetes_sd_configs:
+              - role: pod
+            relabel_configs:
+              - action: keep
+                regex: prometheus-node-exporter.*
+                source_labels:
+                  - __meta_kubernetes_pod_label_app_kubernetes_io_name
+              - action: replace
+                source_labels:
+                  - __meta_kubernetes_pod_node_name
+                target_label: instance
+              - action: replace
+                source_labels:
+                  - __meta_kubernetes_namespace
+                target_label: namespace
+            metric_relabel_configs:
+              - source_labels: [__name__]
+                action: keep
+                regex: 'node_cpu.*|node_exporter_build_info|node_filesystem.*|node_memory.*|node_network.*|process_cpu_seconds_total|process_resident_memory_bytes'
     otlp:
-      protocols:
-        grpc:
+      protocols: 
+      # https://github.com/open-telemetry/opentelemetry-collector/tree/main/receiver/otlpreceiver
+        grpc:  
           endpoint: 0.0.0.0:4317
-        http:
+        http: 
           endpoint: 0.0.0.0:4318
 
   processors:
@@ -202,24 +174,9 @@ config:
         - k8s.pod.name
         - k8s.pod.uid
         - k8s.pod.start_time
-        labels:
-        - from: pod
-          key: app.kubernetes.io/name
-          tag_name: service.name
-        - from: pod
-          key: k8s-app
-          tag_name: service.name
-        - from: pod
-          key: app.kubernetes.io/instance
-          tag_name: k8s.app.instance
-        - from: pod
-          key: app.kubernetes.io/version
-          tag_name: service.version
-        - from: pod
-          key: app.kubernetes.io/component
-          tag_name: k8s.app.component
       filter:
         node_from_env_var: K8S_NODE_NAME
+      passthrough: false
       pod_association:
       - sources:
         - from: resource_attribute
@@ -229,63 +186,63 @@ config:
           name: k8s.pod.uid
       - sources:
         - from: connection
-    resource/local:
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    resource:
       attributes:
-        - key: cluster
-          action: upsert
-          value: "apps-cluster"
-        - key: cluster_name
-          action: upsert
-          value: "apps-cluster"
-        - key: k8s.cluster.name
-          action: upsert
-          value: "apps-cluster"
-
-    resource/inbound:
-      attributes:
-        - key: service.instance.id
-          action: insert
-          from_attribute: k8s.pod.uid
-        - key: cluster
-          action: insert
-          value: "apps-cluster"
-        - key: cluster_name
-          action: insert
-          value: "apps-cluster"
-        - key: k8s.cluster.name
-          action: insert
-          value: "apps-cluster"
-
-    transform/logs:
-      error_mode: ignore
-      log_statements:
-        - context: log
-          statements:
-            - set(attributes["cluster"], resource.attributes["cluster"])
-            - set(attributes["cluster_name"], resource.attributes["cluster_name"])
-            - set(attributes["k8s.cluster.name"], resource.attributes["k8s.cluster.name"])
-
-    transform/traces:
+      - action: insert
+        from_attribute: k8s.pod.uid
+        key: service.instance.id
+      - key: cluster_name
+        action: insert
+        value: "app-cluster"
+      - key: k8s.cluster.name
+        action: insert
+        value: "app-cluster"
+      - key: cluster
+        action: insert
+        value: "app-cluster"
+    transform:
       error_mode: ignore
       trace_statements:
         - context: span
           statements:
-            - replace_pattern(name, "\\?.*", "")
-            - replace_match(name, "GET /api/products/*", "GET /api/products/{productId}")
-
-    transform/metrics:
-      error_mode: ignore
+            # Could be removed when https://github.com/vercel/next.js/pull/64852 is fixed upstream
+            - replace_pattern(attributes["name"], "\\?.*", "")
+            - replace_match(attributes["name"], "GET /api/products/*", "GET /api/products/{productId}")
+        - context: span
+          # Add cluster_name to the span
+          statements:
+            - set(attributes["cluster_name"], "app-cluster")
+            - set(attributes["k8s.cluster.name"], "app-cluster")
       metric_statements:
         - context: datapoint
           statements:
-            - set(attributes["cluster"], "apps-cluster")
-            - set(attributes["cluster_name"], "apps-cluster")
+            - set(attributes["cluster_name"], "app-cluster")
+            - set(attributes["k8s.cluster.name"], "app-cluster")
+  
+
 
     batch:
+      # https://github.com/open-telemetry/opentelemetry-collector/tree/main/processor/batchprocessor
       send_batch_size: 1000
       send_batch_max_size: 1000
-
+  
   exporters:
+    debug: 
+      verbosity: "normal"
+    loadbalancing/grpc:
+      protocol:
+        otlp:
+          tls:
+            insecure: true
+      resolver:
+        static:
+          hostnames:
+            - "172.18.0.11"  # Replace with correct external IP
+
     loadbalancing/http:
       protocol:
         otlp:
@@ -294,20 +251,22 @@ config:
       resolver:
         static:
           hostnames:
-            - "172.18.0.11"
+            - "172.18.0.11"  # Replace with correct external IP
+
 
   service:
     extensions: [health_check]
     pipelines:
       traces:
         receivers: [otlp]
-        processors: [k8sattributes,resource/inbound, transform/traces, batch]
+        processors: [k8sattributes,transform,resource,batch]
         exporters: [loadbalancing/http]
       metrics:
-        receivers: [otlp, prometheus]
-        processors: [k8sattributes,resource/inbound, resource/local, transform/metrics, batch]
-        exporters: [loadbalancing/http]
+        receivers: [otlp,prometheus]
+        processors: [k8sattributes,transform,resource,batch]
+        exporters: [loadbalancing/http,debug]
       logs:
-        receivers: [otlp, k8s_events]
-        processors: [k8sattributes,resource/inbound, transform/logs, batch]
+        receivers: [otlp,k8s_events,filelog]
+        processors: [k8sattributes,resource,batch]
         exporters: [loadbalancing/http]
+      
