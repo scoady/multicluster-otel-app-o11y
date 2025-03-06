@@ -7,6 +7,22 @@
 _These are referenceable through typical environment variable string interpolation in yaml_:
 
 ```yaml
+extraEnvs:
+  - name: "K8S_NODE_NAME"
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+  - name: OTELPASS
+    valueFrom:
+      secretKeyRef:
+        name: otel-secret
+        key: otel-pass
+  - name: OTELUSERID
+    valueFrom:
+      secretKeyRef:
+        name: otel-secret
+        key: otel-userid
+# ...
 config:
   extensions:
     health_check: {}
