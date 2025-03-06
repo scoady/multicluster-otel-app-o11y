@@ -55,7 +55,7 @@ affinity:
 
 presets:
   hostMetrics:
-    enabled: false
+    enabled: true
   kubeletMetrics:
     enabled: false
   kubernetesAttributes:
@@ -70,6 +70,21 @@ config:
         password: ${OTELPASS}
 
   receivers:
+    filelog:
+      include:
+        - /var/log/pods/*/*/*.log
+      start_at: end
+      include_file_path: true
+      operators:
+        - type: json_parser
+          timestamp:
+            parse_from: attributes.time
+            layout: "%Y-%m-%dT%H:%M:%S.%LZ"
+        - type: regex_parser
+          regex: '^/var/log/pods/(?P<k8s_namespace_name>[^_]+)_(?P<k8s_pod_name>[^_]+)_(?P<k8s_pod_uid>[^/]+)/(?P<container_name>[^/]+)/'
+          parse_from: attributes["log.file.path"]
+          parse_to: attributes
+
     k8s_events:
       auth_type: kubeConfig
     prometheus:
@@ -88,7 +103,7 @@ config:
               - replacement: kubernetes.default.svc.cluster.local:443
                 target_label: __address__
               - regex: (.+)
-                replacement: /api/v1/nodes/$${1}/proxy/metrics/cadvisor
+                replacement: /api/v1/nodes/$$1/proxy/metrics/cadvisor
                 source_labels:
                   - __meta_kubernetes_node_name
                 target_label: __metrics_path__
@@ -98,9 +113,7 @@ config:
                 regex: 'container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_network_transmit_bytes_total'
             scheme: https
             tls_config:
-              ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-              insecure_skip_verify: false
-              server_name: kubernetes
+              insecure_skip_verify: true
 
           - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
             job_name: integrations/kubernetes/kubelet
@@ -110,15 +123,13 @@ config:
               - replacement: kubernetes.default.svc.cluster.local:443
                 target_label: __address__
               - regex: (.+)
-                replacement: /api/v1/nodes/$${1}/proxy/metrics
+                replacement: /api/v1/nodes/$$1/proxy/metrics
                 source_labels:
                   - __meta_kubernetes_node_name
                 target_label: __metrics_path__
             scheme: https
             tls_config:
-              ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-              insecure_skip_verify: false
-              server_name: kubernetes
+              insecure_skip_verify: true
 
           - job_name: integrations/kubernetes/kube-state-metrics
             kubernetes_sd_configs:
@@ -153,6 +164,31 @@ config:
         http: {}
 
   processors:
+    k8sattributes:
+      extract:
+        metadata:
+        - k8s.namespace.name
+        - k8s.deployment.name
+        - k8s.statefulset.name
+        - k8s.daemonset.name
+        - k8s.cronjob.name
+        - k8s.job.name
+        - k8s.node.name
+        - k8s.pod.name
+        - k8s.pod.uid
+        - k8s.pod.start_time
+      filter:
+        node_from_env_var: K8S_NODE_NAME
+      passthrough: false
+      pod_association:
+      - sources:
+        - from: resource_attribute
+          name: k8s.pod.ip
+      - sources:
+        - from: resource_attribute
+          name: k8s.pod.uid
+      - sources:
+        - from: connection
     resource/local:
       attributes:
         - key: cluster
@@ -205,13 +241,21 @@ config:
     pipelines:
       traces:
         receivers: [otlp]
-        processors: [resource/inbound, transform/common, batch]
-        exporters: [otlphttp/grafana_cloud, debug]
+        processors: [k8sattributes,resource/inbound, transform/common, batch]
+        exporters: [otlphttp/grafana_cloud]
       metrics:
-        receivers: [otlp, prometheus]
-        processors: [resource/inbound, resource/local, transform/common, batch]
-        exporters: [otlphttp/grafana_cloud, debug]
+        receivers: [otlp]
+        processors: [k8sattributes,resource/inbound, resource/local, batch]
+        exporters: [otlphttp/grafana_cloud]
+      metrics/local:
+        receivers: [prometheus]
+        processors: [k8sattributes,resource/local, transform/common, batch]
+        exporters: [otlphttp/grafana_cloud]
       logs:
-        receivers: [otlp, k8s_events]
-        processors: [resource/inbound, transform/common, batch]
+        receivers: [otlp]
+        processors: [k8sattributes,resource/inbound, transform/common, batch]
+        exporters: [otlphttp/grafana_cloud]
+      logs/k8s:
+        receivers: [k8s_events,filelog]
+        processors: [k8sattributes, resource/local, batch]
         exporters: [otlphttp/grafana_cloud, debug]

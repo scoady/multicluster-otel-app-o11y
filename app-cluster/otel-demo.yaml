@@ -13,3 +13,5 @@ grafana:
 
 opentelemetry-collector:
   enabled: false
+opensearch:
+  enabled: false
